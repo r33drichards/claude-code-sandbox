@@ -1,10 +1,17 @@
-import { getSandbox, type Sandbox } from '@cloudflare/sandbox';
+import { getSandbox, type Sandbox, parseSSEStream } from '@cloudflare/sandbox';
 
 interface CmdOutput {
   success: boolean;
   stdout: string;
   stderr: string;
 }
+
+interface ExecEvent {
+  type: 'stdout' | 'stderr' | 'complete' | 'error';
+  data?: string;
+  exitCode?: number;
+}
+
 // helper to read the outputs from `.exec` results
 const getOutput = (res: CmdOutput) => (res.success ? res.stdout : res.stderr);
 
@@ -61,22 +68,40 @@ export default {
               // Stream Claude Code output
               controller.enqueue(encoder.encode('=== Claude Code Output ===\n\n'));
 
-              // Get the readable stream from execStream
+              // Get the SSE stream from execStream
               const execStream = await sandbox.execStream(cmd);
-              const reader = execStream.getReader();
-              const decoder = new TextDecoder();
 
-              // Read chunks from the stream
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
+              // Parse SSE events and forward stdout/stderr in real-time
+              for await (const event of parseSSEStream<ExecEvent>(execStream)) {
+                switch (event.type) {
+                  case 'stdout':
+                    if (event.data) {
+                      controller.enqueue(encoder.encode(event.data));
+                    }
+                    break;
 
-                // Decode and forward the chunk
-                const text = decoder.decode(value, { stream: true });
-                controller.enqueue(encoder.encode(text));
+                  case 'stderr':
+                    if (event.data) {
+                      controller.enqueue(encoder.encode(event.data));
+                    }
+                    break;
+
+                  case 'complete':
+                    // Command finished - log exit code if non-zero
+                    if (event.exitCode !== 0) {
+                      controller.enqueue(
+                        encoder.encode(`\n[Exit code: ${event.exitCode}]\n`)
+                      );
+                    }
+                    break;
+
+                  case 'error':
+                    controller.enqueue(
+                      encoder.encode(`\nError: ${event.data || 'Unknown error'}\n`)
+                    );
+                    break;
+                }
               }
-
-              reader.releaseLock();
 
               // After Claude Code completes, get the git diff
               controller.enqueue(encoder.encode('\n\n=== Git Diff ===\n\n'));
@@ -85,7 +110,9 @@ export default {
 
               controller.close();
             } catch (error) {
-              controller.enqueue(encoder.encode(`\nError: ${error instanceof Error ? error.message : String(error)}`));
+              controller.enqueue(
+                encoder.encode(`\nError: ${error instanceof Error ? error.message : String(error)}`)
+              );
               controller.close();
             }
           }
