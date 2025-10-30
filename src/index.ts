@@ -49,8 +49,8 @@ export default {
         // Set env vars for the session
         await sandbox.setEnvVars({ ANTHROPIC_API_KEY });
 
-        // kick off CC with our query using npx
-        const cmd = `cd ${name} && npx -y @anthropic-ai/claude-code --append-system-prompt "${EXTRA_SYSTEM}" -p "${task.replaceAll(
+        // kick off CC with our query
+        const cmd = `cd ${name} && claude --append-system-prompt "${EXTRA_SYSTEM}" -p "${task.replaceAll(
           '"',
           '\\"'
         )}" --permission-mode acceptEdits`;
