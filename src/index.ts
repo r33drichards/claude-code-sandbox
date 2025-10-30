@@ -22,12 +22,15 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === 'POST') {
       try {
-        const { repo, task } = await request.json<{
+        const body = await request.json<{
           repo?: string;
           task?: string;
         }>();
+        console.log('Received body:', JSON.stringify(body));
+        const { repo, task } = body;
+        console.log('Parsed - repo:', repo, 'task:', task);
         if (!repo || !task)
-          return new Response('invalid body', { status: 400 });
+          return new Response(`invalid body - received: ${JSON.stringify(body)}`, { status: 400 });
 
         // get the repo name
         const name = repo.split('/').pop() ?? 'tmp';
